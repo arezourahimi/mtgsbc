@@ -1,9 +1,9 @@
 This repository contains R implementation of the algorithms proposed in "A multitask multiple kernel learning formulation for discriminating early- and late-stage cancers" (manuscript under review).
 
-run_mtmkl_step1_coclustering.R : shows how to produce similarity matrices based on the TCGA cohorts and Hallmark pathways
-run_mtmkl_step2_collect_coclustering_data.R : produces the similarity matrices by combining the results obtained in step 1
-run_mtmkl_step3_using_aggregated_similarity_matrices.R : shows how to replicate multitask experiments on the TCGA cohorts using the similarity matrices produced in step 2.
-run_mtmkl_step4_collect_classification_data.R	: collects the classification results
+* run_mtmkl_step1_coclustering.R : shows how to produce similarity matrices based on the TCGA cohorts and Hallmark pathways
+* run_mtmkl_step2_collect_coclustering_data.R : produces the similarity matrices by combining the results obtained in step 1
+* run_mtmkl_step3_using_aggregated_similarity_matrices.R : shows how to replicate multitask experiments on the TCGA cohorts using the similarity matrices produced in step 2.
+* run_mtmkl_step4_collect_classification_data.R	: collects the classification results
 
 MTGSBC methods
 ------------
