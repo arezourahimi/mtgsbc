@@ -14,6 +14,4 @@ MTGSBC methods
 * group_lasso_multitask_multiple_kernel_classification_test.R => test procedure for multitask group Lasso MKL
 * mtmkl_coclustering_algorithm.R => the heuristic algorithm used for the diversificaion phase in step 1
 
-If you use any of the algorithms implemented in this repository, please cite the following paper (under review):
 
-Arezou Rahimi and Mehmet Gonen. "A multitask multiple kernel learning formulation for discriminating early- and late-stage cancers"
