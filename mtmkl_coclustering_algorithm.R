@@ -1,6 +1,6 @@
 perform_mtmkl_coclustering_step <- function(K_train, y_train, 
-                                    initial_diverse_solutions, 
-                                    coclustering_parameters, cutting_plane_parameters)
+                                            initial_diverse_solutions, 
+                                            coclustering_parameters, cutting_plane_parameters)
 {
   diverse_solutions <- initial_diverse_solutions
   TN <- length(diverse_solutions[[1]]$cohorts)
@@ -213,4 +213,333 @@ perform_mtmkl_coclustering_step <- function(K_train, y_train,
   }
   
   return(outputs)
+}
+
+#Given a matrix of kernel weights, the number of clusters along with the feasibility requirements,
+#returns a near optimal coclustering solution. To prevent stagnation at local optima, 
+#it is used as a sub-module for the global genetic algorithm. 
+coclustering_heuristic_algorithm_local <- function(eta, K, lambda_1, lambda_2, 
+                                                 min_group_size = 2, max_group_size_ratio = 1,
+                                                 mutations = 3, swaps = 1, max_nonimproving = 10000,
+                                                 initial_solution = NULL, fix_cohorts = FALSE, 
+                                                 show_results = FALSE){
+  
+  TN <- ncol(eta)
+  P <- nrow(eta)
+  
+  Delta = matrix(0, nrow = TN, ncol = TN)
+  
+  for(s in 1:(TN-1))
+  {
+    for(q in (s+1):TN)
+    {
+      Delta[s,q] = Delta[q,s] = sum((eta[,s]-eta[,q])^2)
+    }
+  }
+  
+  z <- function(TC, PC){
+    obj <- 0
+    if(lambda_1 > 0)
+    {
+      obj1 <- 0
+      for(m in 1:P)
+      {
+        for(s in 1:TN)
+        {
+          if(TC[s] != PC[m])
+          {
+            obj1 <- obj1 + eta[m,s]
+          }
+        }
+      }
+      
+      obj <- obj + lambda_1*obj1
+    }
+    
+    if(lambda_2 > 0)
+    {
+      obj2 <- 0
+      for(s in 1:(TN-1)){
+        for(q in (s+1):TN){
+          if(TC[s] == TC[q]){
+            obj2 <- obj2 + Delta[s,q]
+          }
+        }
+      }
+      
+      obj <- obj + lambda_2*2*obj2
+    }
+    
+    return(obj)
+  }
+  
+  get_size <- function(group_lables, k)
+  {
+    return(length(which(group_lables==k)))
+  }
+  
+  group_size_range <- function(group_labels)
+  {
+    min_size <- length(group_labels)
+    max_size <- 0
+    for(k in 1:K)
+    {
+      size_k <- get_size(group_labels, k)
+      if(size_k < min_size)
+        min_size = size_k
+      if(size_k > max_size)
+        max_size = size_k
+    }
+    
+    return(c(min_size, max_size))
+  } 
+  
+  if(is.null(initial_solution))
+  {
+    # random initial sol:
+    while(TRUE)
+    {
+      TC <- sample(1:K,TN, replace = TRUE)
+      sizes <- group_size_range(TC)
+      if(sizes[1] >= min_group_size & sizes[2] <= max_group_size_ratio*TN)
+        break
+    }
+    
+    while(TRUE)
+    {
+      PC <- sample(1:K, P, replace = TRUE)
+      sizes <- group_size_range(PC)
+      if(sizes[1] >= min_group_size & sizes[2] <= max_group_size_ratio*P)
+        break
+    }
+    
+    obj <- z(TC,PC)
+    
+    incumbent <- list(cohorts = TC, pathways = PC, objective = obj)
+  }else
+  {
+    incumbent <- initial_solution
+  }
+  
+  iteration <- 1
+  nonimproving <- 0
+  
+  incumbent_solutions = list()
+  incumbent_solutions[[1]] = incumbent
+  
+  while(TRUE){
+    
+    TC_ <- incumbent[[1]]
+    PC_ <- incumbent[[2]]
+    Z_ <- incumbent[[3]]
+    
+    # mutate
+    if(mutations > 0)
+    {
+      for(j in 1:mutations){
+        if(!fix_cohorts)
+        {
+          while(TRUE)
+          {
+            s <- sample(1:TN,1)
+            TC_[s] <- sample(1:K,1)
+            sizes <- group_size_range(TC_)
+            if(sizes[1] >= min_group_size & sizes[2] <= max_group_size_ratio*TN)
+              break
+          }
+        }
+        
+        while(TRUE)
+        {
+          m <- sample(1:P,1)
+          PC_[m] <- sample(1:K,1)
+          sizes <- group_size_range(PC_)
+          if(sizes[1] >= min_group_size & sizes[2] <= max_group_size_ratio*P)
+            break
+        }
+      }
+    }
+    
+    Z_ <- z(TC_,PC_)
+    
+    #swap
+    if(swaps>0)
+    {
+      for(j in 1:swaps)
+      {
+        if(!fix_cohorts)
+        {
+          s1 <- sample(1:TN,1)
+          sk1 <- TC_[s1]
+          s2 <- sample(1:TN,1)
+          sk2 <- TC_[s2]
+          while(sk1 == sk2)
+          {
+            s2 <- sample(1:TN,1)
+            sk2 <- TC_[s2]
+          }
+          
+          TC_[s1] <- sk2
+          TC_[s2] <- sk1
+        }
+        
+        m1 <- sample(1:P,1)
+        mk1 <- PC_[m1]
+        m2 <- sample(1:P,1)
+        mk2 <- PC_[m2]
+        while(mk1 == mk2)
+        {
+          m2 <- sample(1:P,1)
+          mk2 <- PC_[m2]
+        }
+        
+        PC_[m1] <- mk2
+        PC_[m2] <- mk1
+        
+        Z__ <- z(TC_,PC_)
+        if(Z__ < Z_)
+        {
+          Z_ <- Z__
+        }else
+        {
+          if(!fix_cohorts)
+          {
+            TC_[s1] <- sk1
+            TC_[s2] <- sk2
+          }
+          PC_[m1] <- mk1
+          PC_[m2] <- mk2
+        }
+      }
+    }
+    
+    if(Z_ < incumbent[[3]]){
+      incumbent <- list(cohorts = TC_, pathways = PC_, objective = Z_)
+      nonimproving <- 0
+      
+      incumbent_solutions[[length(incumbent_solutions)+1]] <- incumbent
+    }else
+    {
+      nonimproving <- nonimproving + 1
+    }
+    
+    if(show_results)
+    {
+      if(iteration %% 10000 == 0)
+        print(sprintf("iteration %d: obj: %f, incumbent: %f", iteration, Z_, incumbent[[3]]))
+    }
+    
+    iteration <- iteration + 1
+    if(nonimproving > max_nonimproving)
+    {
+      if(show_results)
+        print(sprintf("iteration %d: obj: %f, incumbent: %f", iteration, Z_, incumbent[[3]]))
+      break
+    }
+  }
+  
+  return(incumbent_solutions)
+}
+
+#The genetic algorithm is restarted multiple times to decrease the chance premature convergence 
+coclustering_heuristic_algorithm <- function(eta, K, lambda_1, lambda_2, 
+                                                  min_group_size, max_group_size_ratio,
+                                                  mutations, swaps, 
+                                                  max_local_nonimproving = 10000, 
+                                                  max_global_nonimproving = 10, 
+                                                  diversity_dist = 10, required_diverse_solutions = 10, reoptimize = TRUE)
+{
+  incumbent = list(cohorts = NULL, pathways = NULL, objective = Inf)
+  nonimproving <- 0
+  replication <- 1
+  all_incumbent_solutions = c()
+  
+  while(TRUE)
+  {
+    rep_solutions <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
+                                                          lambda_1 = lambda_1, lambda_2 = lambda_2, 
+                                                          min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio,
+                                                          mutations = mutations, swaps = swaps, 
+                                                          max_nonimproving = max_local_nonimproving, show_results = FALSE, initial_solution = NULL, fix_cohorts = FALSE)
+    
+    all_incumbent_solutions = c(all_incumbent_solutions, rep_solutions)
+    rep <- rep_solutions[[length(rep_solutions)]]
+    if(rep[[3]] < incumbent[[3]])
+    {
+      incumbent <- rep
+      nonimproving <- 0
+    }else
+    {
+      nonimproving <- nonimproving + 1
+    }
+    
+    print(sprintf("replication %d: obj: %f, incumbent: %f", replication, rep[[3]], incumbent[[3]]))
+    
+    if(nonimproving >= max_global_nonimproving)
+    {
+      break
+    }
+    replication <- replication + 1
+  }
+  
+  diverse_solutions <- select_diverse_clusters(all_incumbent_solutions, diversity_dist, required_diverse_solutions)
+  
+  if(reoptimize)
+  {
+    print("reoptimizing diverse solutions:")
+    for(d in 1:length(diverse_solutions))
+    {
+      ds <- diverse_solutions[[d]]
+      opt <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
+                                                  lambda_1 = lambda_1, lambda_2 = lambda_2, 
+                                                  min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio, 
+                                                  mutations = mutations, swaps = swaps, 
+                                                  max_nonimproving = max_local_nonimproving, fix_cohorts = TRUE, initial_solution = ds, 
+                                                  show_results = FALSE)
+      ds_opt <- opt[[length(opt)]]
+      print(sprintf("%d: objective reduced from %f to %f",d , ds$objective, ds_opt$objective))
+      diverse_solutions[[d]] <- ds_opt
+    }
+    
+    diverse_solutions <- diverse_solutions[order(sapply(diverse_solutions, function(incumbent) incumbent$objective))]
+  }
+  
+  return(diverse_solutions)
+}
+
+#Given a list of solutions, returns the top diverse solutions. A minimum diversity is enforced on each pair of the selected solutions
+select_diverse_clusters <- function(all_incumbent_solutions, diversity_dist, required_diverse_solutions)
+{
+  sorted_incumbent_solutions <- all_incumbent_solutions[order(sapply(all_incumbent_solutions, function(incumbent) incumbent$objective))]
+  
+  diverse_solutions <- list()
+  K <- length(unique(sorted_incumbent_solutions[[1]]$cohorts))
+  
+  for(inc in sorted_incumbent_solutions)
+  {
+    if(length(diverse_solutions) == 0)
+    {
+      diverse_solutions[[1]] <- inc
+    }else
+    {
+      min_dist <- Inf
+      for(d in 1:length(diverse_solutions))
+      {
+        dist <- calculate_cluster_distance(inc$cohorts, diverse_solutions[[d]]$cohorts, K)
+        if(dist < min_dist)
+          min_dist <- dist
+      }
+      
+      if(min_dist >= diversity_dist)
+      {
+        index <- length(diverse_solutions) + 1
+        diverse_solutions[[index]] <- inc
+      }
+    }
+    
+    if(length(diverse_solutions) >= required_diverse_solutions)
+      break()
+  }
+  
+  return(diverse_solutions)
 }
