@@ -215,9 +215,76 @@ perform_mtmkl_coclustering_step <- function(K_train, y_train,
   return(outputs)
 }
 
+
+#The heuristic algorithm is restarted multiple times to decrease the chance premature convergence 
+coclustering_heuristic_algorithm <- function(eta, K, lambda_1, lambda_2, 
+                                                  min_group_size, max_group_size_ratio,
+                                                  mutations, swaps, 
+                                                  max_local_nonimproving = 10000, 
+                                                  max_global_nonimproving = 10, 
+                                                  diversity_dist = 10, required_diverse_solutions = 10, reoptimize = TRUE)
+{
+  incumbent = list(cohorts = NULL, pathways = NULL, objective = Inf)
+  nonimproving <- 0
+  replication <- 1
+  all_incumbent_solutions = c()
+  
+  while(TRUE)
+  {
+    rep_solutions <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
+                                                          lambda_1 = lambda_1, lambda_2 = lambda_2, 
+                                                          min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio,
+                                                          mutations = mutations, swaps = swaps, 
+                                                          max_nonimproving = max_local_nonimproving, show_results = FALSE, initial_solution = NULL, fix_cohorts = FALSE)
+    
+    all_incumbent_solutions = c(all_incumbent_solutions, rep_solutions)
+    rep <- rep_solutions[[length(rep_solutions)]]
+    if(rep[[3]] < incumbent[[3]])
+    {
+      incumbent <- rep
+      nonimproving <- 0
+    }else
+    {
+      nonimproving <- nonimproving + 1
+    }
+    
+    print(sprintf("replication %d: obj: %f, incumbent: %f", replication, rep[[3]], incumbent[[3]]))
+    
+    if(nonimproving >= max_global_nonimproving)
+    {
+      break
+    }
+    replication <- replication + 1
+  }
+  
+  diverse_solutions <- select_diverse_clusters(all_incumbent_solutions, diversity_dist, required_diverse_solutions)
+  
+  if(reoptimize)
+  {
+    print("reoptimizing diverse solutions:")
+    for(d in 1:length(diverse_solutions))
+    {
+      ds <- diverse_solutions[[d]]
+      opt <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
+                                                  lambda_1 = lambda_1, lambda_2 = lambda_2, 
+                                                  min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio, 
+                                                  mutations = mutations, swaps = swaps, 
+                                                  max_nonimproving = max_local_nonimproving, fix_cohorts = TRUE, initial_solution = ds, 
+                                                  show_results = FALSE)
+      ds_opt <- opt[[length(opt)]]
+      print(sprintf("%d: objective reduced from %f to %f",d , ds$objective, ds_opt$objective))
+      diverse_solutions[[d]] <- ds_opt
+    }
+    
+    diverse_solutions <- diverse_solutions[order(sapply(diverse_solutions, function(incumbent) incumbent$objective))]
+  }
+  
+  return(diverse_solutions)
+}
+                                                        
 #Given a matrix of kernel weights, the number of clusters along with the feasibility requirements,
 #returns a near optimal coclustering solution. To prevent stagnation at local optima, 
-#it is used as a sub-module for the global genetic algorithm. 
+#it is used as a sub-module for the global heuristic algorithm. 
 coclustering_heuristic_algorithm_local <- function(eta, K, lambda_1, lambda_2, 
                                                  min_group_size = 2, max_group_size_ratio = 1,
                                                  mutations = 3, swaps = 1, max_nonimproving = 10000,
@@ -441,71 +508,6 @@ coclustering_heuristic_algorithm_local <- function(eta, K, lambda_1, lambda_2,
   return(incumbent_solutions)
 }
 
-#The genetic algorithm is restarted multiple times to decrease the chance premature convergence 
-coclustering_heuristic_algorithm <- function(eta, K, lambda_1, lambda_2, 
-                                                  min_group_size, max_group_size_ratio,
-                                                  mutations, swaps, 
-                                                  max_local_nonimproving = 10000, 
-                                                  max_global_nonimproving = 10, 
-                                                  diversity_dist = 10, required_diverse_solutions = 10, reoptimize = TRUE)
-{
-  incumbent = list(cohorts = NULL, pathways = NULL, objective = Inf)
-  nonimproving <- 0
-  replication <- 1
-  all_incumbent_solutions = c()
-  
-  while(TRUE)
-  {
-    rep_solutions <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
-                                                          lambda_1 = lambda_1, lambda_2 = lambda_2, 
-                                                          min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio,
-                                                          mutations = mutations, swaps = swaps, 
-                                                          max_nonimproving = max_local_nonimproving, show_results = FALSE, initial_solution = NULL, fix_cohorts = FALSE)
-    
-    all_incumbent_solutions = c(all_incumbent_solutions, rep_solutions)
-    rep <- rep_solutions[[length(rep_solutions)]]
-    if(rep[[3]] < incumbent[[3]])
-    {
-      incumbent <- rep
-      nonimproving <- 0
-    }else
-    {
-      nonimproving <- nonimproving + 1
-    }
-    
-    print(sprintf("replication %d: obj: %f, incumbent: %f", replication, rep[[3]], incumbent[[3]]))
-    
-    if(nonimproving >= max_global_nonimproving)
-    {
-      break
-    }
-    replication <- replication + 1
-  }
-  
-  diverse_solutions <- select_diverse_clusters(all_incumbent_solutions, diversity_dist, required_diverse_solutions)
-  
-  if(reoptimize)
-  {
-    print("reoptimizing diverse solutions:")
-    for(d in 1:length(diverse_solutions))
-    {
-      ds <- diverse_solutions[[d]]
-      opt <- coclustering_heuristic_algorithm_local(eta = eta, K = K, 
-                                                  lambda_1 = lambda_1, lambda_2 = lambda_2, 
-                                                  min_group_size = min_group_size, max_group_size_ratio = max_group_size_ratio, 
-                                                  mutations = mutations, swaps = swaps, 
-                                                  max_nonimproving = max_local_nonimproving, fix_cohorts = TRUE, initial_solution = ds, 
-                                                  show_results = FALSE)
-      ds_opt <- opt[[length(opt)]]
-      print(sprintf("%d: objective reduced from %f to %f",d , ds$objective, ds_opt$objective))
-      diverse_solutions[[d]] <- ds_opt
-    }
-    
-    diverse_solutions <- diverse_solutions[order(sapply(diverse_solutions, function(incumbent) incumbent$objective))]
-  }
-  
-  return(diverse_solutions)
-}
 
 #Given a list of solutions, returns the top diverse solutions. A minimum diversity is enforced on each pair of the selected solutions
 select_diverse_clusters <- function(all_incumbent_solutions, diversity_dist, required_diverse_solutions)
